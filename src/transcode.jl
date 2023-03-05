@@ -27,7 +27,7 @@ julia> String(decompressed)
 
 ```
 """
-function Base.transcode(::Type{C}, data::ByteData) where C<:Codec
+function Base.transcode(::Type{C}, data::ByteData) where {C<:Codec}
     codec = C()
     initialize(codec)
     try
@@ -78,6 +78,7 @@ julia> String(decompressed)
 """
 function Base.transcode(codec::Codec, data::ByteData)
     input = Buffer(data)
+    @debug "transcode: initial input size = $(initial_output_size(codec, buffermem(input)))"
     output = Buffer(initial_output_size(codec, buffermem(input)))
     error = Error()
     code = startproc(codec, :write, error)
@@ -86,7 +87,57 @@ function Base.transcode(codec::Codec, data::ByteData)
     end
     n = minoutsize(codec, buffermem(input))
     @label process
+    @debug "transcode: $(buffersize(output)) bytes in output / extra $n bytes requested"
     makemargin!(output, n)
+    @debug "transcode: $(buffersize(output)) bytes in output now"
+    Δin, Δout, code = process(codec, buffermem(input), marginmem(output), error)
+    @debug(
+        "called process()",
+        code = code,
+        input_size = buffersize(input),
+        output_size = marginsize(output),
+        input_delta = Δin,
+        output_delta = Δout,
+    )
+    consumed!(input, Δin)
+    supplied!(output, Δout)
+    if code === :error
+        @goto error
+    elseif code === :end
+        if buffersize(input) > 0
+            if startproc(codec, :write, error) === :error
+                @goto error
+            end
+            n = minoutsize(codec, buffermem(input))
+            @goto process
+        end
+        resize!(output.data, output.marginpos - 1)
+        return output.data
+    else
+        n = max(Δout, minoutsize(codec, buffermem(input)))
+        @goto process
+    end
+    @label error
+    if !haserror(error)
+        set_default_error!(error)
+    end
+    throw(error[])
+end
+
+function Base.transcode(codec::Codec, data::ByteData, initial_size::Int)
+    input = Buffer(data)
+    @debug "transcode: initial input size = $initial_size, previously $(initial_output_size(codec, buffermem(input)))"
+    output = Buffer(initial_size)
+    error = Error()
+    code = startproc(codec, :write, error)
+    if code === :error
+        @goto error
+    end
+    n = minoutsize(codec, buffermem(input))
+    @label process
+    @debug "transcode: $(buffersize(output)) bytes in output / extra $n bytes requested"
+    makemargin!(output, n)
+    @debug "transcode: $(buffersize(output)) bytes in output now"
     Δin, Δout, code = process(codec, buffermem(input), marginmem(output), error)
     @debug(
         "called process()",
