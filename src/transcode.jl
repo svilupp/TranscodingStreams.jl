@@ -124,10 +124,11 @@ function Base.transcode(codec::Codec, data::ByteData)
     throw(error[])
 end
 
-function Base.transcode(codec::Codec, data::ByteData, initial_size::Int)
+# Create a method that takes an output_size argument (no resizing necessary)
+function Base.transcode(codec::Codec, data::ByteData, output_size::Int)
     input = Buffer(data)
-    @debug "transcode: initial input size = $initial_size, previously $(initial_output_size(codec, buffermem(input)))"
-    output = Buffer(initial_size)
+    @debug "transcode: initial output size = $output_size, previously would have been $(initial_output_size(codec, buffermem(input)))"
+    output = Buffer(output_size)
     error = Error()
     code = startproc(codec, :write, error)
     if code === :error
@@ -136,7 +137,8 @@ function Base.transcode(codec::Codec, data::ByteData, initial_size::Int)
     n = minoutsize(codec, buffermem(input))
     @label process
     @debug "transcode: $(buffersize(output)) bytes in output / extra $n bytes requested"
-    makemargin!(output, n)
+    # comment out as it keeps extending even when the output_size is known
+    # makemargin!(output, n)
     @debug "transcode: $(buffersize(output)) bytes in output now"
     Δin, Δout, code = process(codec, buffermem(input), marginmem(output), error)
     @debug(
